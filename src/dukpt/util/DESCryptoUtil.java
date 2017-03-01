@@ -10,10 +10,11 @@ import javax.crypto.Cipher;
 import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
+import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 public class DESCryptoUtil {
-	private static String TRIPLE_DES_TRANSFORMATION = "DESede/ECB/NoPadding";
+	private static String TRIPLE_DES_TRANSFORMATION = "DESede/CBC/NoPadding";
 	private static String ALGORITHM = "DESede";
     
     public static byte[] tdesEncrypt(byte[] input, byte[] key) throws IllegalBlockSizeException, BadPaddingException, NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException, InvalidKeyException, InvalidAlgorithmParameterException {
@@ -27,7 +28,8 @@ public class DESCryptoUtil {
     	
     	SecretKey keySpec = new SecretKeySpec(key, ALGORITHM);
         Cipher encrypter = Cipher.getInstance(TRIPLE_DES_TRANSFORMATION);
-        encrypter.init(Cipher.ENCRYPT_MODE, keySpec);
+		final IvParameterSpec iv = new IvParameterSpec(new byte[8]);
+        encrypter.init(Cipher.ENCRYPT_MODE, keySpec, iv);
         
         return encrypter.doFinal(input);
     }
@@ -42,8 +44,10 @@ public class DESCryptoUtil {
     	}
     	
     	SecretKey keySpec = new SecretKeySpec(key, ALGORITHM);
+		final IvParameterSpec iv = new IvParameterSpec(new byte[8]);
         Cipher cipher = Cipher.getInstance(TRIPLE_DES_TRANSFORMATION);
-        cipher.init(Cipher.DECRYPT_MODE, keySpec);
+
+        cipher.init(Cipher.DECRYPT_MODE, keySpec, iv);
         
         return cipher.doFinal(input);
     }

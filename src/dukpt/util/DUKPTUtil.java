@@ -19,8 +19,37 @@ public class DUKPTUtil {
 	public static final String TRANSACTION_COUNTER_MASK = "00 00 00 00 00 00 00 1F FF FF";
 	// Used for deriving IPEK and future keys
 	public static final String BDK_MASK = "C0 C0 C0 C0 00 00 00 00 C0 C0 C0 C0 00 00 00 00";
-	private static final String PIN_ENCRYPTION_VARIANT_CONSTANT 				= "00 00 00 00 00 00 00 FF";
-	private static final String SHIFTR = "00 00 00 00 00 10 00 00";
+
+    /**
+     * Variant constant to generate the PIN Encryption Key
+     */
+    private static final String PIN_ENCRYPTION_VARIANT_CONSTANT = "00 00 00 00 00 00 00 FF";
+    /**
+     * Variant constant to generate the MAC Request/Both Ways Encryption Key
+     */
+    private static final String VARIANT_CONSTANT_MAC_REQUEST = "00 00 00 00 00 00 FF 00";
+    /**
+     * Variant constant to generate the Data Request/Both Ways Encryption Key
+     */
+    private static final String VARIANT_CONSTANT_DATA_REQUEST = "00 00 00 00 00 FF 00 00";
+    /**
+     * Variant constant to generate the MAC Response Encryption Key
+     */
+    private static final String VARIANT_CONSTANT_MAC_RESPONSE = "00 00 00 00 FF 00 00 00";
+    /**
+     * Variant constant to generate the Data Response Encryption Key
+     */
+    private static final String VARIANT_CONSTANT_DATA_RESPONSE = "00 00 00 FF 00 00 00 00";
+
+    /**
+     * Variant constant to generate the PIN Encryption Key
+     */
+    private static final String PIN_ENCRYPTION_USING = PIN_ENCRYPTION_VARIANT_CONSTANT;
+
+    private static final String DATA_ENCRYPTION_VARIANT_CONSTANT_BOTH_WAYS = VARIANT_CONSTANT_DATA_REQUEST;
+
+
+    private static final String SHIFTR = "00 00 00 00 00 10 00 00";
 	
 	/**
 	 * Generates an IPEK
@@ -122,89 +151,109 @@ public class DUKPTUtil {
 	 * @throws NoSuchPaddingException
 	 * @throws InvalidAlgorithmParameterException
 	 */
-	public static byte[] deriveKey(byte[] ksn, byte[] bdk)
+	public static byte[] deriveKeyFromBdk(byte[] ksn, byte[] bdk)
 			throws InvalidKeyException, IllegalBlockSizeException,
 			BadPaddingException, NoSuchAlgorithmException,
 			NoSuchProviderException, NoSuchPaddingException,
 			InvalidAlgorithmParameterException {
-		// 4) Store the Key Serial Number, as received, in the externally
-		// initiated command, into the Key Serial Number Register.
-		// 5) Clear the encryption counter (21st right-most bits of KSNR
-		byte[] r3 = DUKPTUtil.extractTransactionCounterFromKSN(ksn);
-		byte[] r8 = ByteArrayUtil.subArray(
-				DUKPTUtil.ksnWithZeroedTransactionCounter(ksn), 2, 9);
-		byte[] shiftr = StringUtil.hexStringToBytes(SHIFTR);
-		byte[] crypto_register_1 = ByteArrayUtil.subArray(
-				DUKPTUtil.ksnWithZeroedTransactionCounter(ksn), 2, 9);
-		byte[] curKey = bdk;
+        byte[] ipek = DUKPTUtil.generateIPEK(ksn, bdk);
 
-		curKey = DUKPTUtil.generateIPEK(ksn, curKey);
-
-		BigInteger intShiftr = new BigInteger(shiftr);
-		BigInteger zero = new BigInteger("0");
-
-		while (intShiftr.compareTo(zero) == 1) {
-			byte[] temp = ByteArrayUtil.and(shiftr, r3);
-			BigInteger intTemp = new BigInteger(temp);
-
-			if (intTemp.compareTo(zero) == 1) {
-				r8 = ByteArrayUtil.or(r8, shiftr);
-				// crypto_register_1 =
-				// ByteArrayUtil.or(ByteArrayUtil.createSubArray(DUKPTUtil.ksnWithZeroedTransactionCounter(ksn),
-				// 2, 9)/*crypto_register_1*/, shiftr);
-
-				// 1) Crypto Register-1 XORed with the right half of the Key
-				// Register goes to Crypto Register-2.
-				byte[] crypto_register_2 = ByteArrayUtil.xor(
-						r8/* crypto_register_1 */,
-						ByteArrayUtil.subArray(curKey, 8, 15));
-
-				// 2) Crypto Register-2 DEA-encrypted using, as the key, the
-				// left half of the Key Register goes to Crypto Register-2.
-				crypto_register_2 = DESCryptoUtil.desEncrypt(crypto_register_2,
-						ByteArrayUtil.subArray(curKey, 0, 7));
-
-				// 3) Crypto Register-2 XORed with the right half of the Key
-				// Register goes to Crypto Register-2.
-				crypto_register_2 = ByteArrayUtil.xor(crypto_register_2,
-						ByteArrayUtil.subArray(curKey, 8, 15));
-
-				// 4) XOR the Key Register with hexadecimal C0C0 C0C0 0000 0000
-				// C0C0 C0C0 0000 0000.
-				curKey = ByteArrayUtil.xor(curKey,
-						StringUtil.hexStringToBytes(BDK_MASK));
-
-				// 5) Crypto Register-1 XORed with the right half of the Key
-				// Register goes to Crypto Register-1.
-				crypto_register_1 = ByteArrayUtil.xor(
-						r8/* crypto_register_1 */,
-						ByteArrayUtil.subArray(curKey, 8, 15));
-
-				// 6) Crypto Register-1 DEA-encrypted using, as the key, the
-				// left half of the Key Register goes to Crypto Register-1.
-				crypto_register_1 = DESCryptoUtil.desEncrypt(crypto_register_1,
-						ByteArrayUtil.subArray(curKey, 0, 7));
-
-				// 7) Crypto Register-1 XORed with the right half of the Key
-				// Register goes to Crypto Register-1.
-				crypto_register_1 = ByteArrayUtil.xor(crypto_register_1,
-						ByteArrayUtil.subArray(curKey, 8, 15));
-
-				curKey = ByteArrayUtil.join(crypto_register_1,
-						crypto_register_2);
-			}
-
-			shiftr = ByteArrayUtil.shiftRight(shiftr, 1);
-			intShiftr = new BigInteger(shiftr);
-		}
-
-		return curKey;
+        return deriveKeyFromIpek(ksn, ipek);
 	}
 
-	/*public static byte[] calculateDataEncryptionKey(byte[] key) throws InvalidKeyException, IllegalBlockSizeException, BadPaddingException, NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException, InvalidAlgorithmParameterException {
+    /**
+     * Given a Base Derivation Key and a KSN, derives Session Key that matches the encryption counter (21 rightmost bits of the KSN)
+     * @param ksn ten byte array, which 2 leftmost bytes value is 0xFF (ex. FF FF 98 76 54 32 10 E0 12 34)
+     * @param ipek 16 bytes array (double-length key)
+     * @return
+     * @throws InvalidKeyException
+     * @throws IllegalBlockSizeException
+     * @throws BadPaddingException
+     * @throws NoSuchAlgorithmException
+     * @throws NoSuchProviderException
+     * @throws NoSuchPaddingException
+     * @throws InvalidAlgorithmParameterException
+     */
+    public static byte[] deriveKeyFromIpek(byte[] ksn, byte[] ipek)
+            throws InvalidKeyException, IllegalBlockSizeException,
+            BadPaddingException, NoSuchAlgorithmException,
+            NoSuchProviderException, NoSuchPaddingException,
+            InvalidAlgorithmParameterException {
+        // 4) Store the Key Serial Number, as received, in the externally
+        // initiated command, into the Key Serial Number Register.
+        // 5) Clear the encryption counter (21st right-most bits of KSNR
+        byte[] r3 = DUKPTUtil.extractTransactionCounterFromKSN(ksn);
+        byte[] r8 = ByteArrayUtil.subArray(
+                DUKPTUtil.ksnWithZeroedTransactionCounter(ksn), 2, 9);
+        byte[] shiftr = StringUtil.hexStringToBytes(SHIFTR);
+        byte[] crypto_register_1 = ByteArrayUtil.subArray(
+                DUKPTUtil.ksnWithZeroedTransactionCounter(ksn), 2, 9);
+
+        BigInteger intShiftr = new BigInteger(shiftr);
+        BigInteger zero = new BigInteger("0");
+
+        while (intShiftr.compareTo(zero) == 1) {
+            byte[] temp = ByteArrayUtil.and(shiftr, r3);
+            BigInteger intTemp = new BigInteger(temp);
+
+            if (intTemp.compareTo(zero) == 1) {
+                r8 = ByteArrayUtil.or(r8, shiftr);
+                // crypto_register_1 =
+                // ByteArrayUtil.or(ByteArrayUtil.createSubArray(DUKPTUtil.ksnWithZeroedTransactionCounter(ksn),
+                // 2, 9)/*crypto_register_1*/, shiftr);
+
+                // 1) Crypto Register-1 XORed with the right half of the Key
+                // Register goes to Crypto Register-2.
+                byte[] crypto_register_2 = ByteArrayUtil.xor(
+                        r8/* crypto_register_1 */,
+                        ByteArrayUtil.subArray(ipek, 8, 15));
+
+                // 2) Crypto Register-2 DEA-encrypted using, as the key, the
+                // left half of the Key Register goes to Crypto Register-2.
+                crypto_register_2 = DESCryptoUtil.desEncrypt(crypto_register_2,
+                        ByteArrayUtil.subArray(ipek, 0, 7));
+
+                // 3) Crypto Register-2 XORed with the right half of the Key
+                // Register goes to Crypto Register-2.
+                crypto_register_2 = ByteArrayUtil.xor(crypto_register_2,
+                        ByteArrayUtil.subArray(ipek, 8, 15));
+
+                // 4) XOR the Key Register with hexadecimal C0C0 C0C0 0000 0000
+                // C0C0 C0C0 0000 0000.
+                ipek = ByteArrayUtil.xor(ipek,
+                        StringUtil.hexStringToBytes(BDK_MASK));
+
+                // 5) Crypto Register-1 XORed with the right half of the Key
+                // Register goes to Crypto Register-1.
+                crypto_register_1 = ByteArrayUtil.xor(
+                        r8/* crypto_register_1 */,
+                        ByteArrayUtil.subArray(ipek, 8, 15));
+
+                // 6) Crypto Register-1 DEA-encrypted using, as the key, the
+                // left half of the Key Register goes to Crypto Register-1.
+                crypto_register_1 = DESCryptoUtil.desEncrypt(crypto_register_1,
+                        ByteArrayUtil.subArray(ipek, 0, 7));
+
+                // 7) Crypto Register-1 XORed with the right half of the Key
+                // Register goes to Crypto Register-1.
+                crypto_register_1 = ByteArrayUtil.xor(crypto_register_1,
+                        ByteArrayUtil.subArray(ipek, 8, 15));
+
+                ipek = ByteArrayUtil.join(crypto_register_1,
+                        crypto_register_2);
+            }
+
+            shiftr = ByteArrayUtil.shiftRight(shiftr, 1);
+            intShiftr = new BigInteger(shiftr);
+        }
+
+        return ipek;
+    }
+
+	public static byte[] calculateDataEncryptionKey(byte[] key) throws InvalidKeyException, IllegalBlockSizeException, BadPaddingException, NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException, InvalidAlgorithmParameterException {
 		byte[] derived_key = key;
-		byte[] derived_key_L = ByteArrayUtil.createSubArray(derived_key, 0, 7);
-		byte[] derived_key_R = ByteArrayUtil.createSubArray(derived_key, 8, 15);
+		byte[] derived_key_L = ByteArrayUtil.subArray(derived_key, 0, 7);
+		byte[] derived_key_R = ByteArrayUtil.subArray(derived_key, 8, 15);
 		byte[] data_encryption_variant_constant_both_ways = StringUtil.hexStringToBytes(DATA_ENCRYPTION_VARIANT_CONSTANT_BOTH_WAYS);
 		
 		// 1 - derived_key_L XOR'ed with DATA_ENCRYPTION_VARIANT_CONSTANT_BOTH_WAYS = variant_key_L
@@ -214,7 +263,7 @@ public class DUKPTUtil {
 		byte[] variant_key_R = ByteArrayUtil.xor(derived_key_R, data_encryption_variant_constant_both_ways);
 		
 		// 3 - variant_key_L << 64 & variant_key_R = variant_key_L_R 
-		byte[] variant_key_L_R = ByteArrayUtil.joinArrays(variant_key_L, variant_key_R);
+		byte[] variant_key_L_R = ByteArrayUtil.join(variant_key_L, variant_key_R);
 		
 		// 4 - TDEA variantkley_L with variant_key_L_R = encryption_key_L		
 		byte[] encryption_key_L = DESCryptoUtil.tdesEncrypt(variant_key_L, variant_key_L_R);
@@ -223,19 +272,19 @@ public class DUKPTUtil {
 		byte[] encryption_key_R = DESCryptoUtil.tdesEncrypt(variant_key_R, variant_key_L_R);
 		
 		// 6 - variant_key_L << 64 & variant_key_R = new_derived_data_key
-		byte[] new_derived_data_key = ByteArrayUtil.joinArrays(encryption_key_L, encryption_key_R);
+		byte[] new_derived_data_key = ByteArrayUtil.join(encryption_key_L, encryption_key_R);
 		
 		return new_derived_data_key;
-	}*/
+	}
 	
 	/**
 	 * 
-	 * @param derivedKey result of {@link #deriveKey(byte[], byte[])} to generate the key used to encrypt 
+	 * @param derivedKey result of {@link #deriveKeyFromBdk(byte[], byte[])} to generate the key used to encrypt
 	 * card track info.
 	 * @return 16 byte array key that should be passed as the second parameter of {@link DESCryptoUtil#tdesDecrypt(byte[], byte[])}
 	 */
 	public static byte[] calculatePinEncryptionKey(byte[] derivedKey) {
-		byte[] variant_constant = StringUtil.hexStringToBytes(PIN_ENCRYPTION_VARIANT_CONSTANT);
+		byte[] variant_constant = StringUtil.hexStringToBytes(PIN_ENCRYPTION_USING);
 		byte[] derivedKeyL = ByteArrayUtil.subArray(derivedKey, 0, 7);
 		byte[] derivedKeyR = ByteArrayUtil.subArray(derivedKey, 8, 15);
 		
@@ -248,11 +297,11 @@ public class DUKPTUtil {
 		return ByteArrayUtil.join(pin_key_L, pin_key_R);
 	}
 
-	public static byte[] decryptTrack1(byte[] track1, byte[] KSN, byte[] BDK) {
+	public static byte[] decryptTrack1(byte[] data, byte[] KSN, byte[] BDK) {
 		try {
-			byte[] derivedKey = deriveKey(KSN, BDK);
+			byte[] derivedKey = deriveKeyFromBdk(KSN, BDK);
 			byte[] pinKey = calculatePinEncryptionKey(derivedKey);
-			byte[] decryptedInfo = DESCryptoUtil.tdesDecrypt(track1, pinKey); 
+			byte[] decryptedInfo = DESCryptoUtil.tdesDecrypt(data, pinKey);
 			return decryptedInfo;
 		} catch (Exception e) {
 			// TODO Auto-generated catch block
@@ -262,4 +311,47 @@ public class DUKPTUtil {
 			return null;
 		}
 	}
+
+	public static byte[] encryptTrack1(byte[] data, byte[] KSN, byte[] IPEK) {
+		try {
+			byte[] derivedKey = deriveKeyFromIpek(KSN, IPEK);
+			byte[] pinKey = calculatePinEncryptionKey(derivedKey);
+			byte[] encryptedInfo = DESCryptoUtil.tdesEncrypt(data, pinKey);
+			return encryptedInfo;
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+			System.out.println(e.getMessage());
+			System.out.flush();
+			return null;
+		}
+	}
+
+    public static byte[] decryptData(byte[] data, byte[] KSN, byte[] BDK) {
+        try {
+            byte[] derivedKey = deriveKeyFromBdk(KSN, BDK);
+            byte[] pinKey = calculateDataEncryptionKey(derivedKey);
+            byte[] decryptedInfo = DESCryptoUtil.tdesDecrypt(data, pinKey);
+            return decryptedInfo;
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.out.println(e.getMessage());
+            System.out.flush();
+            return null;
+        }
+    }
+
+    public static byte[] encryptData(byte[] data, byte[] KSN, byte[] IPEK) {
+        try {
+            byte[] derivedKey = deriveKeyFromIpek(KSN, IPEK);
+            byte[] pinKey = calculateDataEncryptionKey(derivedKey);
+            byte[] encryptedInfo = DESCryptoUtil.tdesEncrypt(data, pinKey);
+            return encryptedInfo;
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.out.println(e.getMessage());
+            System.out.flush();
+            return null;
+        }
+    }
 }
